@@ -37,6 +37,8 @@ public final class AcmeHttpClient implements AutoCloseable {
     /**
      * Retrieves and deserializes a JSON response.
      *
+     * <p>A 503 response is retried up to two more times, 100 ms apart.</p>
+     *
      * @param path request path relative to the service base URL
      * @param type response type
      * @param <T> response type
@@ -45,8 +47,6 @@ public final class AcmeHttpClient implements AutoCloseable {
      * @throws UncheckedIOException wrapping org.apache.http.conn.HttpHostConnectException if the host refuses the connection
      * @throws UncheckedIOException when a read timeout occurs; its cause is a SocketTimeoutException
      * @throws IllegalStateException if this client has been closed
-     *
-     * A 503 response is retried for GET requests up to two times, with a 100 ms interval.
      */
     public <T> T get(String path, Class<T> type) {
         ensureOpen();
@@ -58,6 +58,8 @@ public final class AcmeHttpClient implements AutoCloseable {
     /**
      * Sends a JSON request and deserializes its response.
      *
+     * <p>POST requests are not retried on a 503 response.</p>
+     *
      * @param path request path relative to the service base URL
      * @param body request value serialized as JSON
      * @param type response type
@@ -67,8 +69,6 @@ public final class AcmeHttpClient implements AutoCloseable {
      * @throws UncheckedIOException wrapping org.apache.http.conn.HttpHostConnectException if the host refuses the connection
      * @throws UncheckedIOException when a read timeout occurs; its cause is a SocketTimeoutException
      * @throws IllegalStateException if this client has been closed
-     *
-     * POST requests are not retried.
      */
     public <T> T post(String path, Object body, Class<T> type) {
         ensureOpen();

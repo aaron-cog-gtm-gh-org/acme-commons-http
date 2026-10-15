@@ -41,8 +41,10 @@ The Apache transport can retry I/O failures up to two times for requests it cons
 
 ## Build
 
+Dependencies resolve through Acme Artifactory (`maven-virtual`); `.mvn/settings.xml` mirrors every repository to `ARTIFACTORY_URL`.
+
 ```sh
-ARTIFACTORY_URL=https://maven-central.storage-download.googleapis.com/maven2 \
+ARTIFACTORY_URL=http://localhost:8081/artifactory/maven-virtual \
   mvn -B -s .mvn/settings.xml verify
 ```
 
