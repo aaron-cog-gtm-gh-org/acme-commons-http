@@ -1,0 +1,97 @@
+name: publish
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+  packages: read
+concurrency: publish
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    services:
+      artifactory:
+        image: ghcr.io/aaron-cog-gtm-gh-org/acme-mock-artifactory:latest
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        ports: ["8081:8081"]
+        env:
+          BLOCKLIST: ${{ vars.ARTIFACTORY_BLOCKLIST }}
+    env:
+      ARTIFACTORY_URL: http://localhost:8081/artifactory/maven-virtual
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }   # no maven cache on purpose: a warm cache hides the 403
+
+      - name: Resolve release version
+        id: version
+        run: |
+          version=$(python3 -c "import xml.etree.ElementTree as ET; ns={'m':'http://maven.apache.org/POM/4.0.0'}; print(ET.parse('pom.xml').getroot().find('m:version', ns).text.strip())")
+          case "$version" in
+            *-SNAPSHOT) echo "::error::main must carry a release version, found $version"; exit 1 ;;
+          esac
+          echo "Release version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Look for maven-repo branch
+        id: branch
+        run: |
+          if git ls-remote --exit-code --heads origin maven-repo > /dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "maven-repo branch not found; it will be created"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out maven-repo
+        if: steps.branch.outputs.exists == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: maven-repo
+          path: maven-repo
+
+      - name: Create maven-repo branch
+        if: steps.branch.outputs.exists != 'true'
+        run: |
+          git worktree add --detach maven-repo
+          cd maven-repo
+          git checkout --orphan maven-repo
+          git rm -rfq .
+          cat > README.md <<'README'
+          # acme-commons-http releases
+
+          Maven release repository for `com.acme.commons:acme-commons-http`, in standard
+          Maven layout. Maintained by the `publish` workflow on `main`; do not edit by hand.
+          README
+
+      - name: Check whether version is already published
+        id: published
+        run: |
+          dir="maven-repo/com/acme/commons/acme-commons-http/${{ steps.version.outputs.version }}"
+          if [ -d "$dir" ]; then
+            echo "${{ steps.version.outputs.version }} already published; nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy to maven-repo
+        if: steps.published.outputs.skip != 'true'
+        run: mvn -B -s .mvn/settings.xml deploy -DskipTests -DaltDeploymentRepository=acme-releases::file://$GITHUB_WORKSPACE/maven-repo
+
+      - name: Commit and push release
+        if: steps.published.outputs.skip != 'true'
+        working-directory: maven-repo
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "release ${{ steps.version.outputs.version }}"
+          git push origin HEAD:refs/heads/maven-repo
