@@ -2,6 +2,10 @@
 
 All notable changes to this project are documented here.
 
+## [1.5.0] - 2026-10
+
+- Update Apache HttpClient from 4.5.12 to 4.5.14 to remediate CVE-2020-13956. The 4.5.12 artifact is blocked by the Acme Artifactory Xray policy `ACME-Critical-CVE`. No public API or behaviour changes.
+
 ## [1.4.0] - 2025-04
 
 - Apply a connection-request timeout and configure bounded I/O retries.
