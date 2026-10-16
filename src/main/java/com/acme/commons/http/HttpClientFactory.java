@@ -5,16 +5,21 @@ import java.util.Objects;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.DefaultHttpRequestRetryHandler;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.util.Timeout;
 
 /**
  * Creates configured HTTP clients for Acme service integrations.
  */
 public final class HttpClientFactory {
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
+    private static final int MAX_CONNECTIONS_PER_ROUTE = 2;
+    private static final int MAX_CONNECTIONS_TOTAL = 20;
     private static final ObjectMapper MAPPER = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
@@ -49,17 +54,24 @@ public final class HttpClientFactory {
         if (timeout.isNegative() || timeout.isZero()) {
             throw new IllegalArgumentException("timeout must be positive");
         }
-        int ms = Math.toIntExact(timeout.toMillis());
+        Timeout ms = Timeout.ofMilliseconds(Math.toIntExact(timeout.toMillis()));
+        PoolingHttpClientConnectionManager connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
+                .setDefaultConnectionConfig(ConnectionConfig.custom()
+                        .setConnectTimeout(ms)
+                        .setSocketTimeout(ms)
+                        .build())
+                .setMaxConnPerRoute(MAX_CONNECTIONS_PER_ROUTE)
+                .setMaxConnTotal(MAX_CONNECTIONS_TOTAL)
+                .build();
         RequestConfig cfg = RequestConfig.custom()
-                .setConnectTimeout(ms)
-                .setSocketTimeout(ms)
                 .setConnectionRequestTimeout(ms)
+                .setResponseTimeout(ms)
                 .build();
         CloseableHttpClient httpClient = HttpClients.custom()
+                .setConnectionManager(connectionManager)
                 .setDefaultRequestConfig(cfg)
-                .setRetryHandler(new DefaultHttpRequestRetryHandler(2, false))
-                .setServiceUnavailableRetryStrategy(new GetOnlyServiceUnavailableRetryStrategy(2, 100))
-                .setUserAgent("acme-commons-http/1.4.0")
+                .setRetryStrategy(new GetOnlyServiceUnavailableRetryStrategy(2, 100))
+                .setUserAgent("acme-commons-http/1.5.0")
                 .build();
         return new AcmeHttpClient(baseUrl, httpClient, MAPPER);
     }

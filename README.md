@@ -8,7 +8,7 @@ Acme Commons HTTP is the shared JSON-over-HTTP client used by Acme Bank services
 <dependency>
   <groupId>com.acme.commons</groupId>
   <artifactId>acme-commons-http</artifactId>
-  <version>1.4.0</version>
+  <version>1.5.0</version>
 </dependency>
 ```
 
@@ -33,11 +33,11 @@ try (AcmeHttpClient client = HttpClientFactory.create("https://accounts.acme.exa
 | Non-2xx status, including 404, 500, or an exhausted 503 | Throws `AcmeHttpException`; `status()` returns the HTTP status and the message includes up to 200 response-body characters. |
 | GET response status 503 | Retries at most twice, 100 ms apart; a succeeding attempt returns normally. |
 | POST response status 503 | Not retried. |
-| Connection refused | Throws `UncheckedIOException` wrapping `org.apache.http.conn.HttpHostConnectException` (a `ConnectException` subtype). |
+| Connection refused | Throws `UncheckedIOException` whose cause is a `java.net.ConnectException`. Match on `ConnectException`, not on a transport-specific subtype. |
 | Read timeout | Throws `UncheckedIOException` with a `SocketTimeoutException` cause. |
 | Closed client | `get` and `post` throw `IllegalStateException`; `close()` is idempotent. |
 
-The Apache transport can retry I/O failures up to two times for requests it considers safe to retry. The service-unavailable policy is limited to GET and status 503.
+The transport is Apache HttpClient 5 (`org.apache.httpcomponents.client5:httpclient5`). It retries I/O failures up to two times for idempotent requests, never for connect failures, timeouts, unknown hosts, or TLS errors. The service-unavailable policy is limited to GET and status 503; other statuses, including 429, are not retried.
 
 ## Build
 

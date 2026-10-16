@@ -142,6 +142,46 @@ class AcmeHttpClientTest {
     }
 
     @Test
+    void doesNotRetryGet429() {
+        wireMock.stubFor(get(urlEqualTo("/throttled")).willReturn(aResponse().withStatus(429)
+                .withHeader("Retry-After", "1")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThatThrownBy(() -> client.get("/throttled", Account.class))
+                    .isInstanceOf(AcmeHttpException.class)
+                    .satisfies(error -> assertThat(((AcmeHttpException) error).status()).isEqualTo(429));
+        }
+
+        wireMock.verify(1, getRequestedFor(urlEqualTo("/throttled")));
+    }
+
+    @Test
+    void sendsLibraryUserAgent() {
+        wireMock.stubFor(get(urlEqualTo("/agent")).willReturn(aResponse().withStatus(204)));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThat(client.get("/agent", Account.class)).isNull();
+        }
+
+        wireMock.verify(getRequestedFor(urlEqualTo("/agent"))
+                .withHeader("User-Agent", equalTo("acme-commons-http/1.5.0")));
+    }
+
+    @Test
+    void wrapsPostConnectionRefusal() throws Exception {
+        int port;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            port = socket.getLocalPort();
+        }
+
+        try (AcmeHttpClient client = HttpClientFactory.create("http://127.0.0.1:" + port)) {
+            assertThatThrownBy(() -> client.post("/refused", new Payment("42", 20.00), Account.class))
+                    .isInstanceOf(UncheckedIOException.class)
+                    .hasCauseInstanceOf(java.net.ConnectException.class);
+        }
+    }
+
+    @Test
     void wrapsConnectionRefusal() throws Exception {
         int port;
         try (ServerSocket socket = new ServerSocket(0)) {

@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.acme.commons</groupId>
   <artifactId>acme-commons-http</artifactId>
-  <version>1.4.0</version>
+  <version>1.5.0</version>
   <name>Acme Commons HTTP</name>
   <description>Shared HTTP client utilities for Acme Bank services.</description>
   <packaging>jar</packaging>
@@ -14,13 +14,14 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
     <junit.version>5.11.4</junit.version>
+    <httpclient5.version>5.3.1</httpclient5.version>
   </properties>
 
   <dependencies>
     <dependency>
-      <groupId>org.apache.httpcomponents</groupId>
-      <artifactId>httpclient</artifactId>
-      <version>4.5.12</version>
+      <groupId>org.apache.httpcomponents.client5</groupId>
+      <artifactId>httpclient5</artifactId>
+      <version>${httpclient5.version}</version>
     </dependency>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
