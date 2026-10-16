@@ -4,7 +4,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>com.acme.commons</groupId>
   <artifactId>acme-commons-http</artifactId>
-  <version>1.4.0</version>
+  <version>1.5.0</version>
   <name>Acme Commons HTTP</name>
   <description>Shared HTTP client utilities for Acme Bank services.</description>
   <packaging>jar</packaging>
@@ -20,7 +20,7 @@
     <dependency>
       <groupId>org.apache.httpcomponents</groupId>
       <artifactId>httpclient</artifactId>
-      <version>4.5.12</version>
+      <version>4.5.14</version>
     </dependency>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>

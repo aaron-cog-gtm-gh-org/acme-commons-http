@@ -8,7 +8,7 @@ Acme Commons HTTP is the shared JSON-over-HTTP client used by Acme Bank services
 <dependency>
   <groupId>com.acme.commons</groupId>
   <artifactId>acme-commons-http</artifactId>
-  <version>1.4.0</version>
+  <version>1.5.0</version>
 </dependency>
 ```
 

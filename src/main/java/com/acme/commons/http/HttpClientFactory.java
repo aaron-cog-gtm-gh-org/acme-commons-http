@@ -59,7 +59,7 @@ public final class HttpClientFactory {
                 .setDefaultRequestConfig(cfg)
                 .setRetryHandler(new DefaultHttpRequestRetryHandler(2, false))
                 .setServiceUnavailableRetryStrategy(new GetOnlyServiceUnavailableRetryStrategy(2, 100))
-                .setUserAgent("acme-commons-http/1.4.0")
+                .setUserAgent("acme-commons-http/1.5.0")
                 .build();
         return new AcmeHttpClient(baseUrl, httpClient, MAPPER);
     }
