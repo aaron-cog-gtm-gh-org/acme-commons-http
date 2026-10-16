@@ -151,8 +151,68 @@ class AcmeHttpClientTest {
         try (AcmeHttpClient client = HttpClientFactory.create("http://127.0.0.1:" + port)) {
             assertThatThrownBy(() -> client.get("/refused", Account.class))
                     .isInstanceOf(UncheckedIOException.class)
-                    .hasCauseInstanceOf(java.net.ConnectException.class);
+                    .hasCauseInstanceOf(java.net.ConnectException.class)
+                    .hasCauseInstanceOf(org.apache.hc.client5.http.HttpHostConnectException.class);
         }
+    }
+
+    @Test
+    void sendsLibraryUserAgent() {
+        wireMock.stubFor(get(urlEqualTo("/ua")).willReturn(aResponse().withStatus(204)));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThat(client.get("/ua", Void.class)).isNull();
+        }
+
+        wireMock.verify(getRequestedFor(urlEqualTo("/ua"))
+                .withHeader("User-Agent", equalTo("acme-commons-http/1.5.0")));
+    }
+
+    @Test
+    void returnsStringBodyAsIs() {
+        wireMock.stubFor(get(urlEqualTo("/text")).willReturn(aResponse().withBody("plain body")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThat(client.get("/text", String.class)).isEqualTo("plain body");
+        }
+    }
+
+    @Test
+    void includesBodySnippetInErrorMessage() {
+        wireMock.stubFor(get(urlEqualTo("/bad")).willReturn(aResponse().withStatus(400).withBody("x".repeat(300))));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThatThrownBy(() -> client.get("/bad", Account.class))
+                    .isInstanceOf(AcmeHttpException.class)
+                    .hasMessage("GET /bad returned HTTP 400: " + "x".repeat(200));
+        }
+    }
+
+    @Test
+    void followsGetRedirect() {
+        wireMock.stubFor(get(urlEqualTo("/old")).willReturn(aResponse().withStatus(302).withHeader("Location", "/new")));
+        wireMock.stubFor(get(urlEqualTo("/new")).willReturn(aResponse()
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"id\":\"moved\",\"balance\":1}")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThat(client.get("/old", Account.class).id()).isEqualTo("moved");
+        }
+    }
+
+    @Test
+    void doesNotReplayRedirectedPostAsGet() {
+        wireMock.stubFor(post(urlEqualTo("/payments-old"))
+                .willReturn(aResponse().withStatus(302).withHeader("Location", "/payments-new")));
+        wireMock.stubFor(get(urlEqualTo("/payments-new")).willReturn(aResponse().withStatus(200)));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThatThrownBy(() -> client.post("/payments-old", new Payment("42", 20.00), Account.class))
+                    .isInstanceOf(AcmeHttpException.class)
+                    .satisfies(error -> assertThat(((AcmeHttpException) error).status()).isEqualTo(302));
+        }
+
+        wireMock.verify(0, getRequestedFor(urlEqualTo("/payments-new")));
     }
 
     @Test

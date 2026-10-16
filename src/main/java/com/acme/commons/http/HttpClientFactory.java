@@ -5,10 +5,13 @@ import java.util.Objects;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.DefaultHttpRequestRetryHandler;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.hc.client5.http.config.ConnectionConfig;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.core5.util.TimeValue;
+import org.apache.hc.core5.util.Timeout;
 
 /**
  * Creates configured HTTP clients for Acme service integrations.
@@ -49,17 +52,26 @@ public final class HttpClientFactory {
         if (timeout.isNegative() || timeout.isZero()) {
             throw new IllegalArgumentException("timeout must be positive");
         }
-        int ms = Math.toIntExact(timeout.toMillis());
-        RequestConfig cfg = RequestConfig.custom()
+        Timeout ms = Timeout.ofMilliseconds(Math.toIntExact(timeout.toMillis()));
+        ConnectionConfig connectionConfig = ConnectionConfig.custom()
                 .setConnectTimeout(ms)
                 .setSocketTimeout(ms)
+                .setValidateAfterInactivity(TimeValue.ofSeconds(2))
+                .build();
+        RequestConfig cfg = RequestConfig.custom()
                 .setConnectionRequestTimeout(ms)
+                .setResponseTimeout(ms)
                 .build();
         CloseableHttpClient httpClient = HttpClients.custom()
+                .setConnectionManager(PoolingHttpClientConnectionManagerBuilder.create()
+                        .setDefaultConnectionConfig(connectionConfig)
+                        .setMaxConnTotal(20)
+                        .setMaxConnPerRoute(2)
+                        .build())
                 .setDefaultRequestConfig(cfg)
-                .setRetryHandler(new DefaultHttpRequestRetryHandler(2, false))
-                .setServiceUnavailableRetryStrategy(new GetOnlyServiceUnavailableRetryStrategy(2, 100))
-                .setUserAgent("acme-commons-http/1.4.0")
+                .setRetryStrategy(new AcmeRetryStrategy(2, TimeValue.ofMilliseconds(100)))
+                .setRedirectStrategy(new GetHeadOnlyRedirectStrategy())
+                .setUserAgent("acme-commons-http/1.5.0")
                 .build();
         return new AcmeHttpClient(baseUrl, httpClient, MAPPER);
     }
