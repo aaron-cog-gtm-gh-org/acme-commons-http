@@ -7,7 +7,7 @@ All notable changes to this project are documented here.
 - Replace Apache HttpClient 4.5.12 (blocked by the `ACME-EOL-Components` Xray policy) with Apache HttpClient 5.3.1. The public API is unchanged.
 - Connection-refused failures now have a plain `java.net.ConnectException` cause. Code that matched `org.apache.http.conn.HttpHostConnectException` must match `ConnectException` instead.
 - Keep the 1.4.0 retry, redirect, timeout and error-mapping behaviour, and document it.
-- Validate pooled connections after two seconds of inactivity.
+- Check pooled connections before every reuse (1.4.0 checked only after two seconds idle). A POST sent shortly after an upstream restart no longer fails with `NoHttpResponseException` on a closed pooled connection.
 
 ## [1.4.0] - 2025-04
 

@@ -41,7 +41,7 @@ Idempotent requests are retried up to two times after recoverable I/O failures; 
 
 GET and HEAD follow 301, 302, 307 and 308 redirects. A 303 response is followed with a GET. POST requests that receive 301, 302, 307 or 308 are not followed and throw `AcmeHttpException` with that status.
 
-Each client pools up to 2 connections per route and 20 in total. Pooled connections idle for more than two seconds are validated before reuse. Requests carry `User-Agent: acme-commons-http/<version>`.
+Each client pools up to 2 connections per route and 20 in total. Pooled connections are checked before every reuse, so a connection the upstream closed (for example during a restart) is replaced instead of failing the request. Requests carry `User-Agent: acme-commons-http/<version>`.
 
 ## Build
 

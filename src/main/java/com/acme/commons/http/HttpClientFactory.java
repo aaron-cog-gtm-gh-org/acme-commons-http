@@ -22,7 +22,7 @@ public final class HttpClientFactory {
     private static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(5);
     private static final int MAX_RETRIES = 2;
     private static final TimeValue SERVICE_UNAVAILABLE_RETRY_INTERVAL = TimeValue.ofMilliseconds(100);
-    private static final TimeValue VALIDATE_AFTER_INACTIVITY = TimeValue.ofSeconds(2);
+    private static final TimeValue VALIDATE_AFTER_INACTIVITY = TimeValue.ZERO_MILLISECONDS;
     private static final int MAX_CONNECTIONS_PER_ROUTE = 2;
     private static final int MAX_CONNECTIONS_TOTAL = 20;
     private static final ObjectMapper MAPPER = new ObjectMapper()

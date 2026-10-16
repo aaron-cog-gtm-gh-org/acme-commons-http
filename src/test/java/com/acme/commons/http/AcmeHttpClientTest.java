@@ -13,11 +13,17 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
 import java.net.ConnectException;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Locale;
 
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
@@ -308,6 +314,41 @@ class AcmeHttpClientTest {
         }
 
         wireMock.verify(1, postRequestedFor(urlEqualTo("/slow-post")));
+    }
+
+    @Test
+    void replacesPooledConnectionClosedByServer() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread acceptor = new Thread(() -> {
+                for (int i = 0; i < 2; i++) {
+                    try (Socket socket = server.accept()) {
+                        BufferedReader in = new BufferedReader(
+                                new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+                        int contentLength = 0;
+                        for (String line = in.readLine(); line != null && !line.isEmpty(); line = in.readLine()) {
+                            if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) {
+                                contentLength = Integer.parseInt(line.substring(15).trim());
+                            }
+                        }
+                        in.skip(contentLength);
+                        socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                + "Content-Length: 22\r\n\r\n{\"id\":\"" + i + "\",\"balance\":0}")
+                                .getBytes(StandardCharsets.US_ASCII));
+                        socket.getOutputStream().flush();
+                    } catch (IOException e) {
+                        return;
+                    }
+                }
+            });
+            acceptor.start();
+
+            try (AcmeHttpClient client = HttpClientFactory.create("http://127.0.0.1:" + server.getLocalPort())) {
+                assertThat(client.post("/postings", new Payment("42", 1.00), Account.class).id()).isEqualTo("0");
+                Thread.sleep(100);
+                assertThat(client.post("/postings", new Payment("42", 1.00), Account.class).id()).isEqualTo("1");
+            }
+            acceptor.join(5_000);
+        }
     }
 
     private record Account(String id, double balance) {
