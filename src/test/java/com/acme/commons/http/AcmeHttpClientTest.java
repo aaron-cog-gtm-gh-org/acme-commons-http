@@ -13,10 +13,17 @@ import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMoc
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.UncheckedIOException;
+import java.net.ConnectException;
 import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Locale;
 
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
@@ -151,7 +158,7 @@ class AcmeHttpClientTest {
         try (AcmeHttpClient client = HttpClientFactory.create("http://127.0.0.1:" + port)) {
             assertThatThrownBy(() -> client.get("/refused", Account.class))
                     .isInstanceOf(UncheckedIOException.class)
-                    .hasCauseInstanceOf(java.net.ConnectException.class);
+                    .hasCauseInstanceOf(ConnectException.class);
         }
     }
 
@@ -173,6 +180,174 @@ class AcmeHttpClientTest {
 
         try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
             assertThat(client.get("/health", Account.class).id()).isEqualTo("healthy");
+        }
+    }
+
+    @Test
+    void doesNotRetryGet429() {
+        wireMock.stubFor(get(urlEqualTo("/throttled")).willReturn(aResponse().withStatus(429)
+                .withHeader("Retry-After", "1")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThatThrownBy(() -> client.get("/throttled", Account.class))
+                    .isInstanceOfSatisfying(AcmeHttpException.class, error -> assertThat(error.status()).isEqualTo(429));
+        }
+
+        wireMock.verify(1, getRequestedFor(urlEqualTo("/throttled")));
+    }
+
+    @Test
+    void ignoresRetryAfterOnGet503() {
+        wireMock.stubFor(get(urlEqualTo("/retry-after")).willReturn(aResponse().withStatus(503)
+                .withHeader("Retry-After", "30")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            long started = System.nanoTime();
+            assertThatThrownBy(() -> client.get("/retry-after", Account.class))
+                    .isInstanceOf(AcmeHttpException.class);
+            assertThat(Duration.ofNanos(System.nanoTime() - started).toMillis()).isBetween(180L, 2_000L);
+        }
+
+        wireMock.verify(3, getRequestedFor(urlEqualTo("/retry-after")));
+    }
+
+    @Test
+    void truncatesErrorBodyTo200Characters() {
+        String body = "x".repeat(150) + "y".repeat(150);
+        wireMock.stubFor(get(urlEqualTo("/invalid")).willReturn(aResponse().withStatus(422).withBody(body)));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThatThrownBy(() -> client.get("/invalid", Account.class))
+                    .isInstanceOfSatisfying(AcmeHttpException.class, error -> {
+                        assertThat(error.status()).isEqualTo(422);
+                        assertThat(error.getMessage())
+                                .isEqualTo("GET /invalid returned HTTP 422: " + body.substring(0, 200));
+                    });
+        }
+    }
+
+    @Test
+    void sendsLibraryUserAgent() {
+        wireMock.stubFor(get(urlEqualTo("/agent")).willReturn(aResponse().withBody("ok")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThat(client.get("/agent", String.class)).isEqualTo("ok");
+        }
+
+        wireMock.verify(getRequestedFor(urlEqualTo("/agent"))
+                .withHeader("User-Agent", equalTo("acme-commons-http/1.5.0")));
+    }
+
+    @Test
+    void followsGetRedirect() {
+        wireMock.stubFor(get(urlEqualTo("/old")).willReturn(aResponse().withStatus(302)
+                .withHeader("Location", "/new")));
+        wireMock.stubFor(get(urlEqualTo("/new")).willReturn(aResponse()
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"id\":\"42\",\"balance\":1.0}")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThat(client.get("/old", Account.class).id()).isEqualTo("42");
+        }
+
+        wireMock.verify(getRequestedFor(urlEqualTo("/new")).withHeader("Accept", equalTo("application/json")));
+    }
+
+    @Test
+    void doesNotFollowPost302Or307() {
+        wireMock.stubFor(post(urlEqualTo("/found")).willReturn(aResponse().withStatus(302)
+                .withHeader("Location", "/elsewhere")));
+        wireMock.stubFor(post(urlEqualTo("/temporary")).willReturn(aResponse().withStatus(307)
+                .withHeader("Location", "/elsewhere")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThatThrownBy(() -> client.post("/found", new Payment("42", 1.00), Account.class))
+                    .isInstanceOfSatisfying(AcmeHttpException.class, error -> assertThat(error.status()).isEqualTo(302));
+            assertThatThrownBy(() -> client.post("/temporary", new Payment("42", 1.00), Account.class))
+                    .isInstanceOfSatisfying(AcmeHttpException.class, error -> assertThat(error.status()).isEqualTo(307));
+        }
+
+        wireMock.verify(1, postRequestedFor(urlEqualTo("/found")));
+        wireMock.verify(1, postRequestedFor(urlEqualTo("/temporary")));
+        wireMock.verify(0, getRequestedFor(urlEqualTo("/elsewhere")));
+        wireMock.verify(0, postRequestedFor(urlEqualTo("/elsewhere")));
+    }
+
+    @Test
+    void followsPost303AsGet() {
+        wireMock.stubFor(post(urlEqualTo("/submit")).willReturn(aResponse().withStatus(303)
+                .withHeader("Location", "/result")));
+        wireMock.stubFor(get(urlEqualTo("/result")).willReturn(aResponse()
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"id\":\"r-1\",\"balance\":0}")));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl())) {
+            assertThat(client.post("/submit", new Payment("42", 1.00), Account.class).id()).isEqualTo("r-1");
+        }
+
+        wireMock.verify(1, postRequestedFor(urlEqualTo("/submit")));
+        wireMock.verify(1, getRequestedFor(urlEqualTo("/result")));
+    }
+
+    @Test
+    void wrapsPostConnectionRefusal() throws Exception {
+        int port;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            port = socket.getLocalPort();
+        }
+
+        try (AcmeHttpClient client = HttpClientFactory.create("http://127.0.0.1:" + port)) {
+            assertThatThrownBy(() -> client.post("/refused", new Payment("42", 1.00), Account.class))
+                    .isInstanceOf(UncheckedIOException.class)
+                    .hasCauseInstanceOf(ConnectException.class);
+        }
+    }
+
+    @Test
+    void doesNotRetryPostReadTimeout() {
+        wireMock.stubFor(post(urlEqualTo("/slow-post")).willReturn(aResponse().withFixedDelay(2_000)));
+
+        try (AcmeHttpClient client = HttpClientFactory.create(wireMock.baseUrl(), Duration.ofMillis(500))) {
+            assertThatThrownBy(() -> client.post("/slow-post", new Payment("42", 1.00), Account.class))
+                    .isInstanceOf(UncheckedIOException.class)
+                    .hasCauseInstanceOf(SocketTimeoutException.class);
+        }
+
+        wireMock.verify(1, postRequestedFor(urlEqualTo("/slow-post")));
+    }
+
+    @Test
+    void replacesPooledConnectionClosedByServer() throws Exception {
+        try (ServerSocket server = new ServerSocket(0)) {
+            Thread acceptor = new Thread(() -> {
+                for (int i = 0; i < 2; i++) {
+                    try (Socket socket = server.accept()) {
+                        BufferedReader in = new BufferedReader(
+                                new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+                        int contentLength = 0;
+                        for (String line = in.readLine(); line != null && !line.isEmpty(); line = in.readLine()) {
+                            if (line.toLowerCase(Locale.ROOT).startsWith("content-length:")) {
+                                contentLength = Integer.parseInt(line.substring(15).trim());
+                            }
+                        }
+                        in.skip(contentLength);
+                        socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                + "Content-Length: 22\r\n\r\n{\"id\":\"" + i + "\",\"balance\":0}")
+                                .getBytes(StandardCharsets.US_ASCII));
+                        socket.getOutputStream().flush();
+                    } catch (IOException e) {
+                        return;
+                    }
+                }
+            });
+            acceptor.start();
+
+            try (AcmeHttpClient client = HttpClientFactory.create("http://127.0.0.1:" + server.getLocalPort())) {
+                assertThat(client.post("/postings", new Payment("42", 1.00), Account.class).id()).isEqualTo("0");
+                Thread.sleep(100);
+                assertThat(client.post("/postings", new Payment("42", 1.00), Account.class).id()).isEqualTo("1");
+            }
+            acceptor.join(5_000);
         }
     }
 

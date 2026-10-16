@@ -8,7 +8,7 @@ Acme Commons HTTP is the shared JSON-over-HTTP client used by Acme Bank services
 <dependency>
   <groupId>com.acme.commons</groupId>
   <artifactId>acme-commons-http</artifactId>
-  <version>1.4.0</version>
+  <version>1.5.0</version>
 </dependency>
 ```
 
@@ -33,11 +33,15 @@ try (AcmeHttpClient client = HttpClientFactory.create("https://accounts.acme.exa
 | Non-2xx status, including 404, 500, or an exhausted 503 | Throws `AcmeHttpException`; `status()` returns the HTTP status and the message includes up to 200 response-body characters. |
 | GET response status 503 | Retries at most twice, 100 ms apart; a succeeding attempt returns normally. |
 | POST response status 503 | Not retried. |
-| Connection refused | Throws `UncheckedIOException` wrapping `org.apache.http.conn.HttpHostConnectException` (a `ConnectException` subtype). |
+| Connection refused | Throws `UncheckedIOException` with a `java.net.ConnectException` cause. Match on `ConnectException`, not on transport-specific subtypes. |
 | Read timeout | Throws `UncheckedIOException` with a `SocketTimeoutException` cause. |
 | Closed client | `get` and `post` throw `IllegalStateException`; `close()` is idempotent. |
 
-The Apache transport can retry I/O failures up to two times for requests it considers safe to retry. The service-unavailable policy is limited to GET and status 503.
+Idempotent requests are retried up to two times after recoverable I/O failures; POST is never retried. GET requests are retried up to two times after HTTP 503, 100 ms apart (`Retry-After` is ignored). Other statuses, including 429, are not retried.
+
+GET and HEAD follow 301, 302, 307 and 308 redirects. A 303 response is followed with a GET. POST requests that receive 301, 302, 307 or 308 are not followed and throw `AcmeHttpException` with that status.
+
+Each client pools up to 2 connections per route and 20 in total. Pooled connections are checked before every reuse, so a connection the upstream closed (for example during a restart) is replaced instead of failing the request. Requests carry `User-Agent: acme-commons-http/<version>`.
 
 ## Build
 
