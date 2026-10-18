@@ -51,3 +51,5 @@ ARTIFACTORY_URL=http://localhost:8081/artifactory/maven-virtual \
 ## Releasing
 
 Bump the release version on `main`. The `publish` workflow deploys the Maven artifacts to the `maven-repo` branch. Consumers resolve releases through Acme Artifactory's `maven-virtual` repository.
+
+Updated by Aaron Diamond-Reivich
